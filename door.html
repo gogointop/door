@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="開門">
+<title>開門</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.3.4/mqtt.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: #0a0a0a;
+    --surface: #141414;
+    --accent: #c8a96e;
+    --accent2: #e8c98e;
+    --text: #f0ede8;
+    --muted: #666;
+    --success: #4caf7d;
+    --error: #e05252;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans TC', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* 背景光暈 */
+  body::before {
+    content: '';
+    position: fixed;
+    top: -30%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(200,169,110,0.08) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 48px;
+    padding: 40px 24px;
+    width: 100%;
+    max-width: 380px;
+  }
+
+  /* 頂部標題 */
+  .header {
+    text-align: center;
+  }
+
+  .header h1 {
+    font-size: 13px;
+    font-weight: 300;
+    letter-spacing: 0.3em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .header p {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+  }
+
+  /* 連線狀態 */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 100px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.4s;
+  }
+
+  .status-dot.connecting { background: var(--accent); animation: pulse 1.2s infinite; }
+  .status-dot.connected { background: var(--success); }
+  .status-dot.error { background: var(--error); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .status-text {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    transition: color 0.4s;
+  }
+
+  .status-text.connected { color: var(--success); }
+  .status-text.error { color: var(--error); }
+
+  /* 主按鈕區域 */
+  .btn-area {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* 外圈光暈 */
+  .ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid rgba(200,169,110,0.15);
+    animation: ringPulse 3s ease-in-out infinite;
+  }
+
+  .ring-1 { width: 240px; height: 240px; animation-delay: 0s; }
+  .ring-2 { width: 290px; height: 290px; animation-delay: 0.5s; opacity: 0.6; }
+  .ring-3 { width: 340px; height: 340px; animation-delay: 1s; opacity: 0.3; }
+
+  @keyframes ringPulse {
+    0%, 100% { opacity: 0.15; transform: scale(1); }
+    50% { opacity: 0.3; transform: scale(1.02); }
+  }
+
+  /* 開門按鈕 */
+  .door-btn {
+    position: relative;
+    width: 180px;
+    height: 180px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    background: var(--surface);
+    outline: none;
+    z-index: 10;
+    transition: transform 0.15s;
+    -webkit-appearance: none;
+  }
+
+  .door-btn::before {
+    content: '';
+    position: absolute;
+    inset: 2px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, #1a1a1a, #0d0d0d);
+    border: 1px solid rgba(200,169,110,0.2);
+  }
+
+  .door-btn::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, var(--accent), transparent 60%, var(--accent2), transparent 80%, var(--accent));
+    z-index: -1;
+    opacity: 0.4;
+  }
+
+  .door-btn:active {
+    transform: scale(0.94);
+  }
+
+  .door-btn.firing::after {
+    animation: spinGlow 0.6s ease-out;
+    opacity: 1;
+  }
+
+  @keyframes spinGlow {
+    0% { opacity: 0.4; transform: rotate(0deg); }
+    50% { opacity: 1; }
+    100% { opacity: 0.4; transform: rotate(360deg); }
+  }
+
+  .btn-inner {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .btn-icon {
+    font-size: 36px;
+    line-height: 1;
+    transition: transform 0.3s;
+  }
+
+  .door-btn:active .btn-icon {
+    transform: scale(0.9);
+  }
+
+  .btn-label {
+    font-size: 12px;
+    font-weight: 300;
+    letter-spacing: 0.25em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+
+  /* 回饋訊息 */
+  .feedback {
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .feedback-msg {
+    font-size: 12px;
+    letter-spacing: 0.15em;
+    opacity: 0;
+    transition: opacity 0.3s;
+    color: var(--success);
+  }
+
+  .feedback-msg.show { opacity: 1; }
+  .feedback-msg.error { color: var(--error); }
+
+  /* 底部 */
+  .footer {
+    font-size: 10px;
+    color: rgba(255,255,255,0.12);
+    letter-spacing: 0.1em;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>遠端開門</h1>
+    <p>點擊按鈕解鎖大門</p>
+  </div>
+
+  <div class="status-bar">
+    <div class="status-dot connecting" id="dot"></div>
+    <span class="status-text" id="statusText">連線中...</span>
+  </div>
+
+  <div class="btn-area">
+    <div class="ring ring-1"></div>
+    <div class="ring ring-2"></div>
+    <div class="ring ring-3"></div>
+    <button class="door-btn" id="doorBtn" onclick="openDoor()">
+      <div class="btn-inner">
+        <div class="btn-icon">🔓</div>
+        <div class="btn-label">開門</div>
+      </div>
+    </button>
+  </div>
+
+  <div class="feedback">
+    <div class="feedback-msg" id="feedback"></div>
+  </div>
+
+  <div class="footer">MQTT · HiveMQ Cloud · TLS</div>
+</div>
+
+<script>
+const BROKER = 'wss://a48d74ed775840a390ab0dae8e04b2ae.s1.eu.hivemq.cloud:8884/mqtt';
+const USER = 'chaselits';
+const PASS = '_GUqgPtheXry3eX';
+const TOPIC = 'home/door';
+
+const dot = document.getElementById('dot');
+const statusText = document.getElementById('statusText');
+const feedback = document.getElementById('feedback');
+const doorBtn = document.getElementById('doorBtn');
+
+let client;
+let connected = false;
+
+function setStatus(state, text) {
+  dot.className = 'status-dot ' + state;
+  statusText.className = 'status-text ' + state;
+  statusText.textContent = text;
+}
+
+function showFeedback(msg, isError = false) {
+  feedback.textContent = msg;
+  feedback.className = 'feedback-msg show' + (isError ? ' error' : '');
+  setTimeout(() => { feedback.className = 'feedback-msg'; }, 2500);
+}
+
+function connect() {
+  setStatus('connecting', '連線中...');
+  client = mqtt.connect(BROKER, {
+    username: USER,
+    password: PASS,
+    clientId: 'door_' + Math.random().toString(16).substr(2, 8),
+    reconnectPeriod: 3000,
+  });
+
+  client.on('connect', () => {
+    connected = true;
+    setStatus('connected', '已連線');
+  });
+
+  client.on('error', (err) => {
+    connected = false;
+    setStatus('error', '連線失敗');
+  });
+
+  client.on('offline', () => {
+    connected = false;
+    setStatus('connecting', '重新連線...');
+  });
+}
+
+function openDoor() {
+  if (!connected) {
+    showFeedback('尚未連線，請稍候', true);
+    return;
+  }
+  doorBtn.classList.add('firing');
+  setTimeout(() => doorBtn.classList.remove('firing'), 700);
+
+  client.publish(TOPIC, 'open', { qos: 1 }, (err) => {
+    if (err) {
+      showFeedback('發送失敗', true);
+    } else {
+      showFeedback('✓ 開門指令已送出');
+    }
+  });
+}
+
+connect();
+</script>
+</body>
+</html>
