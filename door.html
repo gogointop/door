@@ -130,6 +130,8 @@ const PASS = 'Newnows_14';
 const T_CMD = 'home/door';
 const T_STATUS = 'home/door/status';
 const T_EVENT = 'home/door/event';
+const T_HEARTBEAT = 'home/door/heartbeat';
+const T_PONG = 'home/door/pong';
 
 // 由左至右、由上至下，對應下面 12 張照片
 const PLAYERS = [
@@ -152,7 +154,18 @@ const PHOTOS = [
 ];
 
 const $ = id => document.getElementById(id);
-let client, connected = false, deviceOnline = null, target = -1, busy = false, waitTimer = null;
+let client, connected = false, deviceOnline = null, target = -1, busy = false, waitTimer = null, lastSeen = 0;
+
+function setDevice(online) {
+  deviceOnline = online;
+  setPill('devDot', 'devText', online ? 'ok' : 'bad', online ? '在線' : '離線');
+  updateBanner();
+}
+
+// 門鎖每 60 秒回報一次；超過 3 分鐘沒回報就當作離線
+setInterval(() => {
+  if (connected && deviceOnline && lastSeen && Date.now() - lastSeen > 180000) setDevice(false);
+}, 15000);
 
 function setPill(dotId, textId, state, text) {
   $(dotId).className = 'dot ' + state;
@@ -255,17 +268,21 @@ function connect() {
   client.on('connect', () => {
     connected = true;
     setPill('netDot', 'netText', 'ok', '正常');
-    client.subscribe([T_STATUS, T_EVENT]);
+    client.subscribe([T_STATUS, T_EVENT, T_HEARTBEAT, T_PONG]);
+    client.publish('home/door/ping', 'web');
     updateBanner();
   });
   client.on('message', (topic, payload) => {
     const msg = payload.toString().trim();
     if (topic === T_STATUS) {
-      deviceOnline = (msg === 'online');
-      setPill('devDot', 'devText', deviceOnline ? 'ok' : 'bad', deviceOnline ? '在線' : '離線');
-      updateBanner();
-    } else if (topic === T_EVENT) {
-      onDeviceEvent(msg);
+      // 保留的 offline 可能是舊連線留下的；最近 2 分鐘內有收到回報就不理它
+      if (msg === 'online') { lastSeen = Date.now(); setDevice(true); }
+      else if (!(lastSeen && Date.now() - lastSeen < 120000)) setDevice(false);
+    } else {
+      // 收到門鎖的任何回報（heartbeat / pong / event）都代表它在線
+      lastSeen = Date.now();
+      setDevice(true);
+      if (topic === T_EVENT) onDeviceEvent(msg);
     }
   });
   client.on('offline', () => {
